@@ -1,3 +1,5 @@
+import os
+import pandas as pd
 import streamlit as st
 import nltk
 from nltk.tokenize import word_tokenize
@@ -5,13 +7,11 @@ from nltk.stem import LancasterStemmer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split as ttsplit
 from sklearn import svm
-import pandas as pd
 import pickle
 import numpy as np
 import imaplib
 import email
 import chardet
-import os
 
 # Ensure NLTK data is available
 nltk.data.path.append(os.path.join(os.path.dirname(__file__), 'nltk_data'))
@@ -41,6 +41,7 @@ def preprocess(messages):
         processed_messages.append(' '.join([lstem.stem(word) for word in words]))
     return processed_messages
 
+# Preprocess the messages
 message_x = preprocess(message_X)
 
 # Vectorization process
@@ -58,14 +59,15 @@ classifier = svm.SVC()
 classifier.fit(x_train, y_train)
 
 # Store the classifier and message features for prediction
-pickle.dump({'classifier': classifier, 'message_x': message_x, 'tfvec': tfvec},
-            open(pickle_path, "wb"))
+with open(pickle_path, "wb") as f:
+    pickle.dump({'classifier': classifier, 'message_x': message_x, 'tfvec': tfvec}, f)
 
 # Load classifier and message data
-datafile = pickle.load(open(pickle_path, "rb"))
-message_x = datafile["message_x"]
-classifier = datafile["classifier"]
-tfvec = datafile["tfvec"]
+with open(pickle_path, "rb") as f:
+    datafile = pickle.load(f)
+    message_x = datafile["message_x"]
+    classifier = datafile["classifier"]
+    tfvec = datafile["tfvec"]
 
 # Function to connect to Gmail and fetch emails
 def fetch_emails(limit=50):
@@ -98,14 +100,14 @@ def fetch_emails(limit=50):
                         payload = part.get_payload(decode=True)
                         body += payload.decode('utf-8', 'ignore') if isinstance(payload, bytes) else payload
                     except Exception as e:
-                        print(f"Error decoding message: {e}")
+                        st.error(f"Error decoding message: {e}")
 
             email_texts[subject] = body if body else None
 
     except imaplib.IMAP4.error as e:
-        print(f"IMAP error occurred: {e}")
+        st.error(f"IMAP error occurred: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        st.error(f"An unexpected error occurred: {e}")
 
     return email_texts
 

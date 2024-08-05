@@ -1,8 +1,3 @@
-import nltk
-
-# Download necessary NLTK data
-nltk.download('punkt')
-
 import streamlit as st
 import nltk
 from nltk.tokenize import word_tokenize
@@ -17,26 +12,24 @@ import imaplib
 import email
 import chardet
 
-# Paths to files
-file_path = "spam.csv"  # Use relative path
-pickle_path = "training_data.pkl"  # Use relative path
+# Specify the path to local NLTK data
+nltk.data.path.append('D:\\CCA final project')
+
+# Download necessary NLTK data
+# Note: This line might be skipped if NLTK data is pre-included
+# nltk.download('punkt')
+
+# Path to files
+file_path = "D:\\CCA final project\\spam.csv"
+pickle_path = "D:\\CCA final project\\training_data.pkl"
 
 # Detect file encoding
-try:
-    with open(file_path, 'rb') as rawdata:
-        result = chardet.detect(rawdata.read(100000))
-    encoding = result['encoding']
-except FileNotFoundError:
-    st.error(f"File not found: {file_path}")
-    st.stop()
+with open(file_path, 'rb') as rawdata:
+    result = chardet.detect(rawdata.read(100000))
+encoding = result['encoding']
 
 # Read the dataset file
-try:
-    df = pd.read_csv(file_path, encoding=encoding)
-except Exception as e:
-    st.error(f"Error reading file: {e}")
-    st.stop()
-
+df = pd.read_csv(file_path, encoding=encoding)
 message_X = df.iloc[:, 1]  # EmailText column
 labels_Y = df.iloc[:, 0]  # Label
 
@@ -71,43 +64,31 @@ classifier = svm.SVC()
 classifier.fit(x_train, y_train)
 
 # Store the classifier and message features for prediction
-try:
-    with open(pickle_path, "wb") as f:
-        pickle.dump({'classifier': classifier, 'message_x': message_x, 'tfvec': tfvec}, f)
-except Exception as e:
-    st.error(f"Error saving model: {e}")
-    st.stop()
+pickle.dump({'classifier': classifier, 'message_x': message_x, 'tfvec': tfvec},
+            open(pickle_path, "wb"))
 
 # Load classifier and message data
-try:
-    with open(pickle_path, "rb") as f:
-        datafile = pickle.load(f)
-    message_x = datafile["message_x"]
-    classifier = datafile["classifier"]
-    tfvec = datafile["tfvec"]
-except FileNotFoundError:
-    st.error(f"File not found: {pickle_path}")
-    st.stop()
-except Exception as e:
-    st.error(f"Error loading model: {e}")
-    st.stop()
+datafile = pickle.load(open(pickle_path, "rb"))
+message_x = datafile["message_x"]
+classifier = datafile["classifier"]
+tfvec = datafile["tfvec"]
 
 # Function to connect to Gmail and fetch emails
 def fetch_emails(limit=50):
+    username = st.secrets["email"]
+    password = st.secrets["password"]
+
+    # Connect to the IMAP server
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
+    mail.login(username, password)
+    mail.select("inbox")  # Select inbox or another folder
+
+    email_texts = {}
     try:
-        username = st.secrets["email"]
-        password = st.secrets["password"]
-
-        # Connect to the IMAP server
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
-        mail.login(username, password)
-        mail.select("inbox")  # Select inbox or another folder
-
-        email_texts = {}
+        # Fetch recent emails
         result, data = mail.search(None, "ALL")  # Fetch all emails
         email_ids = data[0].split()
         email_ids = email_ids[-limit:]  # Limit to the last `limit` emails
-
         for num in email_ids:
             result, data = mail.fetch(num, "(RFC822)")
             raw_email = data[0][1]
@@ -123,6 +104,7 @@ def fetch_emails(limit=50):
                 content_disposition = str(part.get("Content-Disposition"))
 
                 if content_type == "text/plain" and "attachment" not in content_disposition:
+                    # Decode text parts
                     try:
                         payload = part.get_payload(decode=True)
                         if isinstance(payload, bytes):
@@ -130,7 +112,7 @@ def fetch_emails(limit=50):
                         else:
                             body += payload
                     except Exception as e:
-                        st.error(f"Error decoding message: {e}")
+                        print(f"Error decoding message: {e}")
                         continue
 
             if body:
@@ -139,9 +121,9 @@ def fetch_emails(limit=50):
                 email_texts[subject] = None
 
     except imaplib.IMAP4.error as e:
-        st.error(f"IMAP error occurred: {e}")
+        print(f"IMAP error occurred: {e}")
     except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
+        print(f"An unexpected error occurred: {e}")
 
     return email_texts
 

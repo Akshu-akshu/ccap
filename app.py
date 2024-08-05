@@ -1,3 +1,8 @@
+import nltk
+
+# Download necessary NLTK data
+nltk.download('punkt')
+
 import streamlit as st
 import nltk
 from nltk.tokenize import word_tokenize

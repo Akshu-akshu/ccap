@@ -3,5 +3,5 @@ nltk==3.8.1
 scikit-learn==1.2.2
 pandas==2.0.2
 numpy==1.24.4
-imaplib2==2.7.0
+imaplib2==3.6  # or any compatible version
 chardet==5.1.0

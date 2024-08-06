@@ -1,5 +1,4 @@
-import os
-import pandas as pd
+import chardet
 import streamlit as st
 import nltk
 from nltk.tokenize import word_tokenize
@@ -7,26 +6,20 @@ from nltk.stem import LancasterStemmer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split as ttsplit
 from sklearn import svm
+import pandas as pd
 import pickle
 import numpy as np
 import imaplib
 import email
-import chardet
-
-# Ensure NLTK data is available
-nltk.data.path.append(os.path.join(os.path.dirname(__file__), 'nltk_data'))
-
-# Path to files
-file_path = os.path.join(os.path.dirname(__file__), 'data', 'spam.csv')
-pickle_path = os.path.join(os.path.dirname(__file__), 'data', 'training_data.pkl')
 
 # Detect file encoding
-with open(file_path, 'rb') as rawdata:
+file = "spam.csv"
+with open(file, 'rb') as rawdata:
     result = chardet.detect(rawdata.read(100000))
 encoding = result['encoding']
 
 # Read the dataset file
-df = pd.read_csv(file_path, encoding=encoding)
+df = pd.read_csv(file, encoding=encoding)
 message_X = df.iloc[:, 1]  # EmailText column
 labels_Y = df.iloc[:, 0]  # Label
 
@@ -36,12 +29,14 @@ lstem = LancasterStemmer()
 def preprocess(messages):
     processed_messages = []
     for msg in messages:
+        # Filter out non-alphabetic characters
         msg = ''.join(filter(lambda ch: ch.isalpha() or ch == " ", msg))
+        # Tokenize the messages
         words = word_tokenize(msg)
+        # Stem the words
         processed_messages.append(' '.join([lstem.stem(word) for word in words]))
     return processed_messages
 
-# Preprocess the messages
 message_x = preprocess(message_X)
 
 # Vectorization process
@@ -59,28 +54,31 @@ classifier = svm.SVC()
 classifier.fit(x_train, y_train)
 
 # Store the classifier and message features for prediction
-with open(pickle_path, "wb") as f:
-    pickle.dump({'classifier': classifier, 'message_x': message_x, 'tfvec': tfvec}, f)
+pickle.dump({'classifier': classifier, 'message_x': message_x, 'tfvec': tfvec},
+            open("training_data.pkl", "wb"))
 
 # Load classifier and message data
-with open(pickle_path, "rb") as f:
-    datafile = pickle.load(f)
-    message_x = datafile["message_x"]
-    classifier = datafile["classifier"]
-    tfvec = datafile["tfvec"]
+datafile = pickle.load(open("training_data.pkl", "rb"))
+classifier = datafile["classifier"]
+tfvec = datafile["tfvec"]
 
-# Function to connect to Gmail and fetch emails
-def fetch_emails(limit=50):
-    username = st.secrets["email"]
-    password = st.secrets["password"]
+# Function to connect to Gmail IMAP server
+def connect_to_email():
+    username = st.secrets["email"]  # Use your own email address
+    password = st.secrets["password"]  # Use your own password
 
+    # Connect to the IMAP server
     mail = imaplib.IMAP4_SSL("imap.gmail.com")
     mail.login(username, password)
-    mail.select("inbox")
+    mail.select("inbox")  # Select inbox or another folder
 
+    return mail
+
+# Function to fetch emails
+def fetch_emails(mail, limit=50):
     email_texts = {}
     try:
-        result, data = mail.search(None, "ALL")
+        result, data = mail.search(None, "ALL")  # Fetch all emails
         email_ids = data[0].split()
         email_ids = email_ids[-limit:]
         for num in email_ids:
@@ -98,7 +96,10 @@ def fetch_emails(limit=50):
                 if content_type == "text/plain" and "attachment" not in content_disposition:
                     try:
                         payload = part.get_payload(decode=True)
-                        body += payload.decode('utf-8', 'ignore') if isinstance(payload, bytes) else payload
+                        if isinstance(payload, bytes):
+                            body += payload.decode('utf-8', 'ignore')
+                        else:
+                            body += payload
                     except Exception as e:
                         st.error(f"Error decoding message: {e}")
 
@@ -116,51 +117,42 @@ def preprocess_message(message):
     words = word_tokenize(msg)
     return ' '.join([lstem.stem(word) for word in words])
 
-# Streamlit app layout
-st.title('Spam Email Detector')
+# Function to classify email
+def classify_email(body):
+    processed_msg = preprocess_message(body)
+    vectorized_msg = tfvec.transform([processed_msg]).toarray()
+    prediction = classifier.predict(vectorized_msg)[0]
+    result = "spam" if prediction == 1 else "ham"
+    return result
 
-if st.button('Fetch Emails'):
+# Streamlit UI
+st.title("Spam Detector")
+
+# Button to fetch emails
+if st.button("Fetch Emails"):
     with st.spinner('Fetching emails...'):
-        email_texts = fetch_emails()
+        mail = connect_to_email()
+        email_texts = fetch_emails(mail)
         if email_texts:
-            st.session_state['emails'] = email_texts
-            st.success('Emails fetched successfully!')
+            st.session_state.email_texts = email_texts
+            st.session_state.email_list = list(email_texts.keys())
+            st.success("Emails fetched successfully.")
         else:
-            st.error('No emails fetched.')
+            st.write("No emails found.")
 
-if 'emails' in st.session_state:
-    emails = st.session_state['emails']
-    subjects = list(emails.keys())
-    if subjects:
-        selected_subject = st.selectbox('Select an email to classify:', subjects)
+# Display and classify emails
+if 'email_list' in st.session_state:
+    selected_email_subject = st.selectbox("Select an email:", st.session_state.email_list)
+    if selected_email_subject:
+        email_body = st.session_state.email_texts[selected_email_subject]
 
-        if selected_subject:
-            email_body = emails[selected_subject]
-            st.write(f"**Subject:** {selected_subject}")
-            st.write(f"**Body:**\n{email_body}")
+        if st.button("Classify"):
+            if email_body:
+                result = classify_email(email_body)
+                st.write(f"Email '{selected_email_subject}' is: {result}")
+            else:
+                st.write("Email content is empty, likely spam.")
 
-            if st.button('Classify'):
-                if email_body:
-                    processed_msg = preprocess_message(email_body)
-                    vectorized_msg = tfvec.transform([processed_msg]).toarray()
-                    prediction = classifier.predict(vectorized_msg)[0]
-                    result = "spam" if prediction == 1 else "ham"
-                    st.write(f"**Classification Result:** {result}")
-                else:
-                    st.write("Could not extract body.")
-    else:
-        st.write("No subjects available to display.")
-else:
-    st.write("No emails to display. Please fetch emails first.")
-
-
-from sklearn.metrics import accuracy_score
-
-# Make predictions on the test set
-y_pred = classifier.predict(x_test)
-
-# Calculate accuracy
-accuracy = accuracy_score(y_test, y_pred)
-
-# Print or log the accuracy
-print(f"Accuracy: {accuracy * 100:.2f}%")
+# Evaluate accuracy
+accuracy = classifier.score(x_test, y_test)
+st.write(f"Accuracy of the model: {accuracy:.2%}")
